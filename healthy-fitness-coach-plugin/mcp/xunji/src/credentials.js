@@ -117,6 +117,13 @@ async function readLinuxCredential(options = {}) {
 }
 
 function readCredential(options = {}) {
+  const apiKey = (options.env || process.env).XUNJI_API_KEY;
+  if (apiKey !== undefined) {
+    if (!isCredentialValue(apiKey) || Buffer.byteLength(apiKey, 'utf8') > 16_384 || /[\r\n\0]/.test(apiKey)) {
+      return Promise.reject(connectorError('missing_credentials'));
+    }
+    return Promise.resolve(apiKey);
+  }
   const platform = options.platform || process.platform;
   if (platform === 'linux') return readLinuxCredential(options);
   if (platform === 'darwin') return readMacCredential(options);

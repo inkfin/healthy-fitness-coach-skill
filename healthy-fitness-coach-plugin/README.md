@@ -137,7 +137,7 @@ Node 18 依赖树中仍存在已知的 Hono static-server advisory。该 Plugin 
 格式为单行原始 Key，允许末尾换行；不用 JSON，不加 `Bearer ` 前缀。
 文件必须属于运行 MCP 的用户，权限为 `0600` 或 `0400`。拒绝符号链接、目录、
 组/其他用户可访问、可执行、空、多行或超过 16 KiB 的文件。不安全时返回
-`missing_credentials`，不会回退到环境变量 Key 或匿名请求。
+`missing_credentials`，未设置环境变量 Key 时不会匿名请求。
 目录建议 `0700`，不要放在仓库；读取失败不输出路径或内容。
 
 在可信 Linux 主机的 **Bash 交互终端**创建新凭证文件：
@@ -187,3 +187,33 @@ MCP 客户端配置相同的 `docker run --rm -i ...` 即可；不要加 `-t` �
 部分 Compose 本地 secrets 不支持 uid/mode，此时使用上面的受限文件挂载。
 UID 映射以容器内看到的归属为准。先验证 initialize/tools-list 和授权日期读取，
 不以真实写入测试。
+
+
+## API Key 环境变量（所有平台）
+
+支持 `XUNJI_API_KEY`，值为原始**训练数据 Key**，不加 `Bearer ` 前缀。
+优先级：`XUNJI_API_KEY` → 平台凭证存储（Linux 文件 / macOS 钥匙串 / Windows DPAPI）。
+未设置变量才使用平台存储；显式设置为空、含换行或超过 16 KiB 时直接报错，不回退。
+Key 只在进程内使用，不自动写入凭证文件、钥匙串、缓存或日志。
+
+Linux Bash 临时配置（隐藏输入）：
+
+```bash
+set +x
+read -r -s -p 'Xunji training API Key: ' XUNJI_API_KEY
+printf '\n'
+export XUNJI_API_KEY
+# 在这个终端启动 MCP 或其客户端；客户端需将变量传给连接器。
+node /absolute/path/repo/healthy-fitness-coach-plugin/mcp/xunji/src/server.js
+```
+
+Docker 可从已设置变量透传，无需挂载凭证文件；保留原有 /data 持久化挂载：
+
+```sh
+docker run --rm -i --env XUNJI_API_KEY \
+  --mount "type=bind,src=$HOME/.local/share/xunji-container,dst=/data" \
+  --user "$(id -u):$(id -g)" healthy-fitness-xunji
+```
+
+`/data` 宿主目录先按上面的 Docker 步骤创建。无需把实际 Key 写进命令行或 MCP
+配置文件；由运行环境注入即可。

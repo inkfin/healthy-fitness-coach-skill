@@ -2,6 +2,10 @@
 
 ## 连接
 
+所有平台先检查 `XUNJI_API_KEY`（原始训练 Key），未设置才读取下面的平台存储。
+空值、多行或超过 16 KiB 的显式变量直接失败，不回退。不要输出变量内容，
+不要把 Key 写入命令参数、仓库或报告；由宿主环境注入。
+
 连接意图已表达时不重复询问。Windows 使用 DPAPI，macOS 使用登录钥匙串，Linux/Docker 使用受限凭证文件；
 Mac 可运行 `swift <plugin>/mcp/xunji/scripts/keychain-credential.swift set` 打开安全窗口。
 禁止在聊天、截图、日志、报告、源码或 Git 中回显 Key。读取已获用户明确授权的

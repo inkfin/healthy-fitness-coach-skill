@@ -136,3 +136,25 @@ test('Linux file credentials reject unsafe permissions, symlinks, wrong ownershi
     }
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+test('API key environment override takes precedence across every platform without reading storage', async () => {
+  for (const platform of ['linux', 'darwin', 'win32', 'unsupported']) {
+    assert.equal(await readCredential({ platform, env: { XUNJI_API_KEY: '  SYNTHETIC_ENV_KEY  ' },
+      credentialFile: '/nonexistent', spawnProcess() { throw new Error('must not read keychain'); }
+    }), '  SYNTHETIC_ENV_KEY  ');
+  }
+});
+
+test('invalid explicit environment keys fail closed without leaking or falling back', async () => {
+  for (const value of ['', '   ', 'PRIVATE\nKEY', 'PRIVATE\rKEY', 'PRIVATE\0KEY', 'x'.repeat(16385)]) {
+    await assert.rejects(readCredential({ platform: 'darwin', env: { XUNJI_API_KEY: value },
+      spawnProcess() { throw new Error('must not fall back'); }
+    }), error => {
+      assert.equal(error.code, 'missing_credentials');
+      assert.doesNotMatch(JSON.stringify(error), /PRIVATE/);
+      return true;
+    });
+  }
+  assert.equal(await readCredential({ platform: 'darwin', env: {}, spawnProcess: mockSecurity() }), '  FAKE KEY  ');
+});
