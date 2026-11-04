@@ -101,3 +101,23 @@ Node 18 依赖树中仍存在已知的 Hono static-server advisory。该 Plugin 
 写回现在必须先获得十分钟有效的 `preview_id`，确认内容后携带该ID提交。结果未知先用 `xunji_reconcile_training_upsert` 核对，不盲目重试。本地 `write-operations/` 保存提交摘要状态，服务重启仍阻止同批重发；不是服务端幂等保证。用户核对最新记录并确认未写入后才解除锁。服务端确认且本地缓存失败时依然返回 confirmed。
 
 接续摘要由用户主动导入另一设备，没有自动云同步。
+
+## 训练 Open API v2
+
+生产连接器默认使用 `/api_trains_for_llm_v2` 和 `/api_upsert_trains_for_llm_v2`，
+请求携带 `schema_version: train_open_api_v2`，从 `res.trains` 读取结构化记录，
+兼容 gzip 和不含 `success` 的成功响应。不自动降级到旧生产接口。
+
+- `xunji_get_training_day` 新增 `include_full_data`（默认 false）。
+  RPE、未完成组、备注、实际休息和心率摘要等须用 true；原始结构保留在 `raw_v2`。
+- 轻量、完整、旧版缓存使用不同目录。趋势仅统计明确完成的正式组；
+  单位未知、超级组、递减子组暂不完整汇总并标记警告，原始数据仍保留。
+- 写回工具 `records` 改为 v2 训练对象数组，最多 4 条同日训练，日期为今天前后
+  六个日历月（边界包含）；每条最多 15 动作，每动作最多 20 组或轮。
+- 保留 `localid/start/end`、全部动作、未完成组及 `note`；仅使用官方中文动作名，
+  不传内部 key。RPE 使用字符串，原生有氧使用 `cardio: true` 和顶层 `metrics`。
+- 写回继续绑定十分钟预览和明确确认；稳定摘要作为 `client_request_id`。
+  空写回结果或结果未知均要求核对，不宣称写入成功，也不自动重发。
+- 此适配只配置训练数据 Key；饮食、身体数据、个人模板需要各自授权，未启用。
+
+验证范围：自动测试使用 mock；真实账号只读验证，不以真实写入测试功能。

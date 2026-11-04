@@ -66,20 +66,21 @@ function createTrainingService({ operationStore = null, cache = null, cacheFacto
   const accountCaches = new Map();
   const accountDnaStores = new Map();
   const dnaPending = new Map();
-  const getCache = async (credential) => {
+  const getCache = async (credential, include_full_data = false) => {
     // `cache` is a test-only single-store injection. Production always keys its
     // stores by the one-way credential fingerprint below.
     if (cache) return cache;
     if (!localAppData) throw connectorError('cache_error');
     const fingerprint = credentialFingerprint(credential);
-    if (accountCaches.has(fingerprint)) return accountCaches.get(fingerprint);
-    const root = join(localAppData, 'HealthyFitnessCoach', 'xunji-cache');
+    const cacheKey = `${fingerprint}:${include_full_data}`;
+    if (accountCaches.has(cacheKey)) return accountCaches.get(cacheKey);
+    const root = join(localAppData, 'HealthyFitnessCoach', client.protocol === 'v2' ? (include_full_data ? 'xunji-cache-v2-full' : 'xunji-cache-v2') : 'xunji-cache');
     const storePromise = cacheFactory ? Promise.resolve().then(() => cacheFactory(credential)) : Promise.resolve(new FileCache({ root, fingerprint }));
-    accountCaches.set(fingerprint, storePromise);
+    accountCaches.set(cacheKey, storePromise);
     try {
       return await storePromise;
     } catch (error) {
-      if (accountCaches.get(fingerprint) === storePromise) accountCaches.delete(fingerprint);
+      if (accountCaches.get(cacheKey) === storePromise) accountCaches.delete(cacheKey);
       throw error;
     }
   };
@@ -111,12 +112,12 @@ function createTrainingService({ operationStore = null, cache = null, cacheFacto
     };
   };
 
-  async function fetchMissing(date, credential, store) {
-    const pendingKey = `${credentialFingerprint(credential)}:${date}`;
+  async function fetchMissing(date, credential, store, include_full_data = false) {
+    const pendingKey = `${credentialFingerprint(credential)}:${date}:${include_full_data}`;
     if (pending.has(pendingKey)) return pending.get(pendingKey);
     const operation = (async () => {
       try {
-        const response = await client.fetchDay(date, credential);
+        const response = await client.fetchDay(date, credential, { include_full_data });
         const decoded = response && Array.isArray(response.records) ? response : decodeXunjiResponse(response);
         const parsed = parseTrainingRecords(decoded.records);
         const filtered = filterModelFacingRecords(parsed);
@@ -134,11 +135,11 @@ function createTrainingService({ operationStore = null, cache = null, cacheFacto
     try { return await operation; } finally { pending.delete(pendingKey); }
   }
 
-  async function getTrainingDay({ date, refresh = false, credentialOverride = null } = {}) {
+  async function getTrainingDay({ date, refresh = false, include_full_data = false, credentialOverride = null } = {}) {
     try {
       assertDate(date);
       const credential = credentialOverride || await credentialProvider();
-      const store = await getCache(credential);
+      const store = await getCache(credential, include_full_data);
       const entry = await store.get(date);
       if (entry) {
         const elapsed = now() - entry.fetched_at;
@@ -149,7 +150,7 @@ function createTrainingService({ operationStore = null, cache = null, cacheFacto
         const ageDays = (Date.parse(todayDate) - Date.parse(date)) / 86400000;
         const recentExpired = ageDays >= 0 && ageDays < 7 && elapsed >= 300000;
         if (!refresh && !recentExpired) return resultFromEntry(date, entry, true, 0);
-        const refreshed = await fetchMissing(date, credential, store);
+        const refreshed = await fetchMissing(date, credential, store, include_full_data);
         if (refreshed.error) {
           if (['missing_credentials', 'invalid_credentials', 'membership_required'].includes(refreshed.error.code)) return refreshed;
           const fallback = resultFromEntry(date, entry, true, 0);
@@ -158,7 +159,7 @@ function createTrainingService({ operationStore = null, cache = null, cacheFacto
         }
         return refreshed;
       }
-      return await fetchMissing(date, credential, store);
+      return await fetchMissing(date, credential, store, include_full_data);
     } catch (error) {
       return { error: toPublicError(error) };
     }
@@ -223,7 +224,7 @@ function createTrainingService({ operationStore = null, cache = null, cacheFacto
       if (!await operations.claim(key, { outcome: 'unknown', date: validated.date, submitted_at: now() }))
         return { outcome: 'reconciliation_required', error: toPublicError(connectorError('reconciliation_required')) };
       submitted = true;
-      const response = await client.upsertRecords(validated.records, credential);
+      const response = await client.upsertRecords(validated.records, credential, { client_request_id: key });
       const decoded = response && Array.isArray(response.records) ? response : decodeXunjiResponse(response);
       const parsed = parseTrainingRecords(decoded.records);
       if (!parsed.length || parsed.some(record => !record.record_date || record.record_date !== validated.date || record.warnings?.includes('invalid_date'))) throw connectorError('invalid_response');
@@ -231,7 +232,13 @@ function createTrainingService({ operationStore = null, cache = null, cacheFacto
       const warnings = [...safeRecords.warnings, ...parsed.flatMap(record => record.warnings || [])];
       const entry = { fetched_at: now(), records: safeRecords, warnings, last_operation: 'upsert' };
       let cache_saved = true;
-      try { await store.set(validated.date, entry); } catch (_) { cache_saved = false; warnings.push('write_confirmed_cache_failed'); }
+      try {
+        await store.set(validated.date, entry);
+        if (client.protocol === 'v2') {
+          const fullCache = await getCache(credential, true);
+          await fullCache.delete(validated.date);
+        }
+      } catch (_) { cache_saved = false; warnings.push('write_confirmed_cache_failed'); }
       try { await operations.set(key, { outcome: 'confirmed', date: validated.date, confirmed_at: now() }); }
       catch (_) { warnings.push('write_confirmed_journal_update_failed'); }
       return { ...resultFromEntry(validated.date, entry, false, 1), outcome: 'confirmed', writeback: true,
@@ -257,7 +264,7 @@ function createTrainingService({ operationStore = null, cache = null, cacheFacto
         return { outcome: 'verified_not_applied', next: 'create_new_preview_and_confirm', writeback: false };
       }
       // Reconciliation must read the server, not a possibly stale cache.
-      const response = await client.fetchDay(validated.date, credential);
+      const response = await client.fetchDay(validated.date, credential, { include_full_data: true });
       const decoded = response && Array.isArray(response.records) ? response : decodeXunjiResponse(response);
       const parsed = parseTrainingRecords(decoded.records);
       if (parsed.some(record => record.record_date !== validated.date || record.warnings?.includes('invalid_date'))) throw connectorError('invalid_response');
@@ -338,9 +345,9 @@ function createMcpServer(options = {}) {
   };
   server.registerTool('xunji_get_training_day', {
     description: 'Read one day of local Xunji training data.',
-    inputSchema: { date: z.string(), refresh: z.boolean().optional() },
+    inputSchema: { date: z.string(), refresh: z.boolean().optional(), include_full_data: z.boolean().optional() },
     annotations: { readOnlyHint: true }
-  }, ({ date, refresh }) => result(service.getTrainingDay({ date, refresh })));
+  }, ({ date, refresh, include_full_data }) => result(service.getTrainingDay({ date, refresh, include_full_data })));
   server.registerTool('xunji_get_training_range', {
     description: 'Read a local-date range of Xunji training data.',
     inputSchema: { start_date: z.string(), end_date: z.string(), refresh_today: z.boolean().optional(), refresh_dates: z.array(z.string()).optional(), refresh_all: z.boolean().optional() },
@@ -348,17 +355,17 @@ function createMcpServer(options = {}) {
   }, ({ start_date, end_date, refresh_today, refresh_dates, refresh_all }) => result(service.getTrainingRange({ start_date, end_date, refresh_today, refresh_dates, refresh_all })));
   server.registerTool('xunji_preview_training_upsert', {
     description: 'Validate and preview same-day Xunji training updates without writing.',
-    inputSchema: { records: z.array(z.string()) },
+    inputSchema: { records: z.array(z.object({ datestr: z.string(), movements: z.array(z.object({ name: z.string() }).passthrough()) }).passthrough()) },
     annotations: { readOnlyHint: true }
   }, ({ records }) => result(service.previewTrainingUpsert({ records })));
   server.registerTool('xunji_upsert_training_records', {
     description: 'Write confirmed same-day Xunji training records by ID and cache the server result.',
-    inputSchema: { records: z.array(z.string()), confirm: z.boolean(), preview_id: z.string() },
+    inputSchema: { records: z.array(z.object({ datestr: z.string(), movements: z.array(z.object({ name: z.string() }).passthrough()) }).passthrough()), confirm: z.boolean(), preview_id: z.string() },
     annotations: { readOnlyHint: false }
   }, ({ records, confirm, preview_id }) => result(service.upsertTrainingRecords({ records, confirm, preview_id })));
   server.registerTool('xunji_reconcile_training_upsert', {
     description: 'Read server records after an uncertain write. Only clear the submission lock after the user verifies it was not applied.',
-    inputSchema: { records: z.array(z.string()), verification_id: z.string().optional(), confirm_not_applied: z.boolean().optional() },
+    inputSchema: { records: z.array(z.object({ datestr: z.string(), movements: z.array(z.object({ name: z.string() }).passthrough()) }).passthrough()), verification_id: z.string().optional(), confirm_not_applied: z.boolean().optional() },
     annotations: { readOnlyHint: false }
   }, args => result(service.reconcileTrainingUpsert(args)));
   server.registerTool('xunji_get_training_trends', {

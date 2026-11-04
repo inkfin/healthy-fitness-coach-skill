@@ -1,6 +1,8 @@
 'use strict';
 
 const MESSAGES = {
+  v2_record_limit: ['Too many v2 training records.', 'Submit at most four same-day trains.'],
+  v2_date_window: ['The date is outside the v2 write window.', 'Only write within six calendar months of today.'],
   preview_required: ['A matching, unexpired preview is required.', 'Preview these exact records and confirm that preview before writing.'],
   writeback_unknown: ['The write outcome is unknown.', 'Do not resubmit. Reconcile the server records and confirm whether the change was applied.'],
   reconciliation_required: ['This batch was already submitted.', 'Read the server records before any further write.'],

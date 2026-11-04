@@ -103,6 +103,7 @@ function extractNotes(text) {
 
 function parseTrainingRecords(rawRecords) {
   if (!Array.isArray(rawRecords)) return [];
+  if (rawRecords.length && typeof rawRecords[0] === 'object') return require('./v2.js').parseV2Trains(rawRecords);
   return rawRecords.map((raw) => {
     const raw_text = String(raw);
     const official = parseOfficialXunjiRow(raw_text);

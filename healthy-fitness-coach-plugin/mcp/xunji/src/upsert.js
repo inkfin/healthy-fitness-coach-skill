@@ -31,6 +31,7 @@ function parseUpsertLine(line) {
 
 function validateUpsertRecords(records) {
   if (!Array.isArray(records) || records.length === 0) throw connectorError('invalid_upsert');
+  if (records[0] && typeof records[0] === 'object') return require('./v2.js').validateV2Trains(records);
   if (records.length > 12) throw connectorError('record_limit');
   if (records.some((record) => typeof record !== 'string' || record.length > 1500)) throw connectorError('record_too_long');
   const parsed = records.map(parseUpsertLine);

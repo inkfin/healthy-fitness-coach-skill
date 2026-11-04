@@ -37,6 +37,7 @@ function isRestDay(record) {
 
 function isTrackable(record) {
   if (!record || isRestDay(record)) return false;
+  if (record.api_version === 2 && record.completed_activity !== true) return false;
   if (record.kind === 'resistance' || record.kind === 'aerobic') return true;
   if ([record.sets, record.reps, record.total_reps, record.weight, record.volume, record.duration_min, record.distance_km, record.avg_hr].some((value) => value !== undefined && value !== null && value !== '')) return true;
   const text = `${record.title || ''} ${record.name || ''} ${record.raw_text || ''}`;
