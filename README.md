@@ -248,7 +248,7 @@ codex plugin marketplace add .
 codex plugin add healthy-fitness-coach-plugin@surge-dan-fitness
 ```
 
-仓库提供 `.agents/plugins/marketplace.json` 作为安装入口。连接器需要本机 Node 运行时及依赖；Windows 使用 DPAPI，macOS 使用钥匙串；凭据配置见 Plugin README。安装或升级后新建聊天加载，必要时重启桌面客户端。
+仓库提供 `.agents/plugins/marketplace.json` 作为安装入口。连接器需要本机 Node 运行时及依赖；Windows 使用 DPAPI，macOS 使用钥匙串，Linux/Docker 使用受限本地凭证文件；凭据配置见 Plugin README。安装或升级后新建聊天加载，必要时重启桌面客户端。
 
 如果希望长期在本机自动读取训记，可选安装[`healthy-fitness-coach-plugin/`](healthy-fitness-coach-plugin/)。插件提供本地训记MCP连接器、加密凭据存储、日期范围读取、趋势分析、训练DNA提取与版本保存，以及确认后写回，普通用户不需要使用这条路径。
 

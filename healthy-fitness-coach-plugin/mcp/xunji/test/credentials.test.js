@@ -69,7 +69,7 @@ test('macOS missing, denied, empty and failed Keychain reads expose no secret or
       return true;
     });
   }
-  await assert.rejects(readCredential({ platform: 'linux' }), { code: 'missing_credentials' });
+  await assert.rejects(readCredential({ platform: 'unsupported' }), { code: 'missing_credentials' });
 });
 
 test('macOS stalled Keychain process is killed on timeout', async () => {
@@ -85,5 +85,54 @@ test('macOS stalled Keychain process is killed on timeout', async () => {
 test('platform data directories preserve Windows and avoid project-local macOS caches', () => {
   assert.equal(dataHome({ platform: 'darwin', home: '/Users/test', localAppData: '/wrong' }), '/Users/test/Library/Application Support');
   assert.equal(dataHome({ platform: 'win32', localAppData: 'C:\\Local' }), 'C:\\Local');
-  assert.equal(dataHome({ platform: 'linux' }), undefined);
+  assert.equal(dataHome({ platform: 'unsupported' }), undefined);
+});
+
+
+const { mkdtemp, writeFile, chmod, symlink, mkdir, rm } = require('node:fs/promises');
+const { tmpdir } = require('node:os');
+const { readLinuxCredential, linuxCredentialPath } = require('../src/credentials.js');
+
+test('Linux credential/data paths follow absolute XDG paths and file override', () => {
+  assert.equal(linuxCredentialPath({ home: '/home/test', credentialFile: '/run/secrets/xunji' }), '/run/secrets/xunji');
+  assert.throws(() => linuxCredentialPath({ credentialFile: 'relative/key' }), { code: 'missing_credentials' });
+  assert.equal(linuxCredentialPath({ home: '/home/test', credentialFile: undefined, xdgConfigHome: '/config' }), '/config/HealthyFitnessCoach/xunji-api-key');
+  assert.equal(linuxCredentialPath({ home: '/home/test', credentialFile: undefined, xdgConfigHome: 'relative' }), '/home/test/.config/HealthyFitnessCoach/xunji-api-key');
+  assert.equal(dataHome({ platform: 'linux', home: '/home/test', xdgDataHome: '/data' }), '/data');
+  assert.equal(dataHome({ platform: 'linux', home: '/home/test', xdgDataHome: '' }), '/home/test/.local/share');
+});
+
+test('Linux file credentials accept owner-only read-only Docker mounts and preserve opaque spaces', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'xunji-file-'));
+  try {
+    const file = join(root, 'key');
+    await writeFile(file, '  FAKE_SECRET  \r\n', { mode: 0o600 });
+    assert.equal(await readCredential({ platform: 'linux', credentialFile: file }), '  FAKE_SECRET  ');
+    await chmod(file, 0o400);
+    assert.equal(await readLinuxCredential({ credentialFile: file }), '  FAKE_SECRET  ');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('Linux file credentials reject unsafe permissions, symlinks, wrong ownership and invalid content', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'xunji-file-'));
+  try {
+    const file = join(root, 'key'), link = join(root, 'link'), directory = join(root, 'dir');
+    await writeFile(file, 'PRIVATE_TEST_SECRET', { mode: 0o600 });
+    const rejected = options => assert.rejects(readLinuxCredential(options), error => {
+      assert.equal(error.code, 'missing_credentials');
+      assert.doesNotMatch(JSON.stringify(error), /PRIVATE_TEST_SECRET|xunji-file-/);
+      return true;
+    });
+    for (const mode of [0o644, 0o640, 0o666, 0o700]) {
+      await chmod(file, mode); await rejected({ credentialFile: file });
+    }
+    await chmod(file, 0o600);
+    await rejected({ credentialFile: file, uid: process.getuid() + 1 });
+    await symlink(file, link); await rejected({ credentialFile: link });
+    await mkdir(directory, { mode: 0o700 }); await rejected({ credentialFile: directory });
+    await rejected({ credentialFile: join(root, 'missing') });
+    for (const value of ['', '   \n', 'KEY\nSECOND', 'KEY\0', 'x'.repeat(16385)]) {
+      await writeFile(file, value); await rejected({ credentialFile: file });
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
 });

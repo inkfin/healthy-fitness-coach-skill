@@ -2,11 +2,17 @@
 
 ## 连接
 
-连接意图已表达时不重复询问。Windows 使用 DPAPI，macOS 使用登录钥匙串；
+连接意图已表达时不重复询问。Windows 使用 DPAPI，macOS 使用登录钥匙串，Linux/Docker 使用受限凭证文件；
 Mac 可运行 `swift <plugin>/mcp/xunji/scripts/keychain-credential.swift set` 打开安全窗口。
 禁止在聊天、截图、日志、报告、源码或 Git 中回显 Key。读取已获用户明确授权的
 本机文件凭证时，直接在内存中转存到钥匙串，不复制文件到仓库。
 未配置时提供导入或先训练路径，不伪称已连接。
+
+Linux/Docker 优先读取 `XUNJI_CREDENTIAL_FILE` 绝对路径，否则读取
+`$XDG_CONFIG_HOME/HealthyFitnessCoach/xunji-api-key`（默认 `~/.config`）。
+文件只放单行训练 Key，归属运行用户、权限 0600/0400；拒绝链接及不安全权限。
+容器只读挂载凭证，持久化 `$XDG_DATA_HOME/HealthyFitnessCoach`（默认 `~/.local/share`）。
+本地 stdio 不提供匿名远程服务；训记 API 的 Bearer 鉴权保持有效。
 
 ## 读取
 

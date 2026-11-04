@@ -1,7 +1,9 @@
 'use strict';
 
 const { spawn } = require('node:child_process');
-const { join } = require('node:path');
+const { join, isAbsolute } = require('node:path');
+const { open } = require('node:fs/promises');
+const { constants } = require('node:fs');
 const { homedir } = require('node:os');
 
 const KEYCHAIN_SERVICE = 'HealthyFitnessCoach.Xunji';
@@ -33,9 +35,10 @@ function readWindowsCredential({ localAppData = process.env.LOCALAPPDATA, spawnP
   });
 }
 
-function dataHome({ platform = process.platform, home = homedir(), localAppData = process.env.LOCALAPPDATA } = {}) {
+function dataHome({ platform = process.platform, home = homedir(), localAppData = process.env.LOCALAPPDATA, xdgDataHome = process.env.XDG_DATA_HOME } = {}) {
   if (platform === 'darwin') return join(home, 'Library', 'Application Support');
   if (platform === 'win32') return localAppData;
+  if (platform === 'linux') return xdgDataHome && isAbsolute(xdgDataHome) ? xdgDataHome : join(home, '.local', 'share');
   return undefined;
 }
 
@@ -70,12 +73,56 @@ function readMacCredential({ spawnProcess = spawn, timeoutMs = 30_000 } = {}) {
   });
 }
 
+// Linux/headless containers: an owner-only file, never a key in argv/env.
+function linuxCredentialPath({ credentialFile = process.env.XUNJI_CREDENTIAL_FILE,
+  home = homedir(), xdgConfigHome = process.env.XDG_CONFIG_HOME } = {}) {
+  if (credentialFile !== undefined) {
+    if (!isAbsolute(credentialFile)) throw connectorError('missing_credentials');
+    return credentialFile;
+  }
+  const root = xdgConfigHome && isAbsolute(xdgConfigHome) ? xdgConfigHome : join(home, '.config');
+  return join(root, 'HealthyFitnessCoach', 'xunji-api-key');
+}
+
+async function readLinuxCredential(options = {}) {
+  let handle;
+  try {
+    const path = linuxCredentialPath(options);
+    // O_NONBLOCK prevents a substituted FIFO from hanging before fstat.
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    const stat = await handle.stat();
+    const uid = options.uid ?? process.getuid?.();
+    if (!stat.isFile() || stat.uid !== uid || !(stat.mode & 0o400)
+        || ![0o400, 0o600].includes(stat.mode & 0o7777) || stat.size < 1 || stat.size > 16_384) {
+      throw connectorError('missing_credentials');
+    }
+    const bytes = Buffer.alloc(16_385);
+    let size = 0;
+    while (size < bytes.length) {
+      const result = await handle.read(bytes, size, bytes.length - size, null);
+      if (!result.bytesRead) break;
+      size += result.bytesRead;
+    }
+    if (size > 16_384) throw connectorError('missing_credentials');
+    const value = bytes.subarray(0, size).toString('utf8').replace(/\r?\n$/, '');
+    bytes.fill(0);
+    if (!isCredentialValue(value) || /[\r\n\0]/.test(value)) throw connectorError('missing_credentials');
+    return value;
+  } catch (_) {
+    // No path, filesystem error, file content or credential in public errors.
+    throw connectorError('missing_credentials');
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+  }
+}
+
 function readCredential(options = {}) {
   const platform = options.platform || process.platform;
+  if (platform === 'linux') return readLinuxCredential(options);
   if (platform === 'darwin') return readMacCredential(options);
   if (platform === 'win32') return readWindowsCredential(options);
   return Promise.reject(connectorError('missing_credentials'));
 }
 
 module.exports = { credentialPath, isCredentialValue, readWindowsCredential,
-  readMacCredential, readCredential, dataHome, KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT };
+  readMacCredential, readLinuxCredential, linuxCredentialPath, readCredential, dataHome, KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT };

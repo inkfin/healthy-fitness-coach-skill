@@ -1,0 +1,13 @@
+.git
+**/node_modules
+**/.env
+**/.env.*
+**/*.dpapi
+**/credentials/
+**/xunji-api-key
+**/xunji-cache*
+**/training-dna
+**/write-operations
+fitness-reports
+output
+tmp

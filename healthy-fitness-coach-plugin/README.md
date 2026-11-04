@@ -94,7 +94,7 @@ Node 18 依赖树中仍存在已知的 Hono static-server advisory。该 Plugin 
 
 ## 连接与写回恢复
 
-本地连接器支持 Windows 和 macOS，不提供手机远程服务。凭据通过本机受保护入口配置，禁止在聊天提交 Key。手机可使用独立 Skill 导入数据。
+本地连接器支持 Windows、macOS 和 Linux/Docker，不提供手机远程服务。凭据通过本机受保护入口配置，禁止在聊天提交 Key。手机可使用独立 Skill 导入数据。
 
 范围、趋势、DNA支持 `refresh_dates` 和 `refresh_all`。最近七天缓存满五分钟更新，90秒内不重复刷新。
 
@@ -121,3 +121,69 @@ Node 18 依赖树中仍存在已知的 Hono static-server advisory。该 Plugin 
 - 此适配只配置训练数据 Key；饮食、身体数据、个人模板需要各自授权，未启用。
 
 验证范围：自动测试使用 mock；真实账号只读验证，不以真实写入测试功能。
+
+## Linux / Docker：本地凭证文件
+
+没有系统钥匙串的 Linux/无桌面容器使用本地文件保存**训练数据 API Key**。
+训记 API 仍使用 Bearer 鉴权；本地 stdio MCP 不开放 HTTP 端口，无需另设 MCP
+登录服务。饮食、身体数据、个人模板的独立 Key 不放进此文件。
+
+凭证路径优先级：
+
+1. `XUNJI_CREDENTIAL_FILE` 指定的绝对路径（变量只存路径，不存 Key）。
+2. `$XDG_CONFIG_HOME/HealthyFitnessCoach/xunji-api-key`（XDG 路径必须绝对）。
+3. `~/.config/HealthyFitnessCoach/xunji-api-key`。
+
+格式为单行原始 Key，允许末尾换行；不用 JSON，不加 `Bearer ` 前缀。
+文件必须属于运行 MCP 的用户，权限为 `0600` 或 `0400`。拒绝符号链接、目录、
+组/其他用户可访问、可执行、空、多行或超过 16 KiB 的文件。不安全时返回
+`missing_credentials`，不会回退到环境变量 Key 或匿名请求。
+目录建议 `0700`，不要放在仓库；读取失败不输出路径或内容。
+
+在可信 Linux 主机的 **Bash 交互终端**创建新凭证文件：
+
+```bash
+set +x
+install -d -m 700 "$HOME/.config/HealthyFitnessCoach"
+( umask 077
+  set -o noclobber
+  read -r -s -p 'Xunji training API Key: ' xunji_key
+  printf '\n' >&2
+  printf '%s' "$xunji_key" > "$HOME/.config/HealthyFitnessCoach/xunji-api-key"
+  unset xunji_key
+)
+```
+
+已有文件不会覆盖。缓存、DNA、写回日志位于 `$XDG_DATA_HOME/HealthyFitnessCoach/`，
+未设置时为 `~/.local/share/HealthyFitnessCoach/`，仍按账号 fingerprint 隔离。
+
+Linux 本机注册（替换实际路径）：
+
+```sh
+codex mcp add xunji --env XUNJI_CREDENTIAL_FILE=/absolute/path/xunji-api-key -- /absolute/path/node /absolute/path/repo/healthy-fitness-coach-plugin/mcp/xunji/src/server.js
+```
+
+### Docker 运行
+
+从仓库根目录构建；镜像只复制代码和依赖，不复制凭证或个人数据：
+
+```sh
+docker build -f healthy-fitness-coach-plugin/Dockerfile -t healthy-fitness-xunji .
+```
+
+在 Linux Docker 主机只读挂载凭证，显式使用宿主 UID/GID，并挂载持久化数据目录：
+
+```sh
+install -d -m 700 "$HOME/.local/share/xunji-container"
+docker run --rm -i --user "$(id -u):$(id -g)" \
+  --mount "type=bind,src=$HOME/.config/HealthyFitnessCoach/xunji-api-key,dst=/run/secrets/xunji-api-key,readonly" \
+  --mount "type=bind,src=$HOME/.local/share/xunji-container,dst=/data" \
+  healthy-fitness-xunji
+```
+
+MCP 客户端配置相同的 `docker run --rm -i ...` 即可；不要加 `-t` 或发布端口。
+持久化 `/data` 以保留未知写入提交锁。Docker secrets 可通过 `XUNJI_CREDENTIAL_FILE`
+指定，但默认 `0444` 会被拒绝；容器内实际权限须为 `0400/0600` 且归属运行用户。
+部分 Compose 本地 secrets 不支持 uid/mode，此时使用上面的受限文件挂载。
+UID 映射以容器内看到的归属为准。先验证 initialize/tools-list 和授权日期读取，
+不以真实写入测试。
