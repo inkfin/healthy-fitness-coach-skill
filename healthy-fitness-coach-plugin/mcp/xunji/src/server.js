@@ -6,7 +6,7 @@ const { join } = require('node:path');
 const { z } = require('zod');
 const { FileCache, credentialFingerprint } = require('./cache.js');
 const { FileDNAStore } = require('./dna-store.js');
-const { readWindowsCredential } = require('./credentials.js');
+const { readCredential, dataHome } = require('./credentials.js');
 const { connectorError, toPublicError } = require('./errors.js');
 const { filterModelFacingRecords, parseTrainingRecords } = require('./parser.js');
 const { assertDate } = require('./schemas.js');
@@ -57,7 +57,7 @@ function dateRangeChunks(startDate, endDate) {
   return chunks;
 }
 
-function createTrainingService({ operationStore = null, cache = null, cacheFactory, dnaStore = null, client = new XunjiClient(), credentialProvider = readWindowsCredential, logger = null, now = Date.now, today = null, localAppData = process.env.LOCALAPPDATA } = {}) {
+function createTrainingService({ operationStore = null, cache = null, cacheFactory, dnaStore = null, client = new XunjiClient(), credentialProvider = readCredential, logger = null, now = Date.now, today = null, localAppData = dataHome() } = {}) {
   const previews = new Map();
   const verifications = new Map();
   const operations = operationStore || (cache ? memoryOperationStore() : new OperationStore(join(localAppData || '.', 'HealthyFitnessCoach', 'write-operations')));

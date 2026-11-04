@@ -113,10 +113,10 @@ function analyzeTrainingRange(input = {}) {
       record_count: bucket.record_count,
       estimated_volume: bucket.volume
     }));
-  const exercise_frequency = [...exercises.values()].sort((a, b) => b.count - a.count || b.last_date.localeCompare(a.last_date) || a.name.localeCompare(b.name));
+  const exercise_frequency = [...exercises.values()].sort((a, b) => b.count - a.count || b.last_date.localeCompare(a.last_date) || a.name.localeCompare(b.name, 'zh-CN'));
   const daily = [...dailyMap.values()].sort((a, b) => a.date.localeCompare(b.date));
   const mainPerformance = [...performance.values()]
-    .sort((a, b) => (exercises.get(b.name)?.count || 0) - (exercises.get(a.name)?.count || 0) || a.name.localeCompare(b.name))[0];
+    .sort((a, b) => (exercises.get(b.name)?.count || 0) - (exercises.get(a.name)?.count || 0) || a.name.localeCompare(b.name, 'zh-CN'))[0];
   const exercise_performance = mainPerformance
     ? mainPerformance.values.sort((a, b) => a.label.localeCompare(b.label))
     : [];

@@ -8,7 +8,7 @@ This package declares its production Xunji connector as local stdio in `.mcp.jso
 
 ## 环境与安装
 
-- 支持 **Windows** 和 **Node.js 18.14.1+**。在 Node 18 上，依赖树使用已锁定的 `@hono/node-server` **1.19.17 override**。
+- 支持 **Windows**（Node.js 18.14.1+）和 **macOS**（Node.js 20+，安装凭证入口需要 Xcode Command Line Tools 的 Swift）。在 Node 18 上，依赖树使用已锁定的 `@hono/node-server` **1.19.17 override**。
 - 从本Plugin根目录运行一键初始化脚本：
 
 ```powershell
@@ -24,9 +24,45 @@ npm --prefix .\mcp\xunji ci --omit=dev --ignore-scripts
 
 只安装Skill不会自动注册本地Plugin。完成初始化后，在Codex的Plugins界面选择“添加本地插件”，目录选择当前`healthy-fitness-coach-plugin`目录；添加后刷新或重启Codex，并新建任务测试：`分析训记最近四周训练`。
 
+## macOS 安装与连接
+
+```sh
+sh healthy-fitness-coach-plugin/scripts/setup-xunji-macos.sh
+```
+
+脚本安装锁定依赖并打开本机安全输入窗口。API Key 通过 Security.framework
+写入登录钥匙串（service: `HealthyFitnessCoach.Xunji`，account: `xunji-api-key`），
+不会放入命令参数、环境变量、stdout 或仓库。取消窗口不会修改已有凭证。
+首次读取时 macOS 可能要求允许 `/usr/bin/security` 访问该条目。
+
+只配置/更新凭证：
+
+```sh
+swift healthy-fitness-coach-plugin/mcp/xunji/scripts/keychain-credential.swift set
+```
+
+删除凭证（本机窗口确认，不删除缓存）：
+
+```sh
+swift healthy-fitness-coach-plugin/mcp/xunji/scripts/keychain-credential.swift remove
+```
+
+缓存、DNA 和写回日志位于 `~/Library/Application Support/HealthyFitnessCoach/`。
+Windows 的 DPAPI 与 `%LOCALAPPDATA%` 路径保持不变。不支持的平台拒绝读取凭证，
+不会回退到明文 Key。不要在聊天、截图、脚本参数或 Git 中提交 Key。
+
+也可以直接注册 MCP（将路径替换为此仓库实际的绝对路径；node 使用绝对路径）：
+
+```sh
+codex mcp add xunji -- /absolute/path/to/node /absolute/path/to/repo/healthy-fitness-coach-plugin/mcp/xunji/src/server.js
+```
+
+新建聊天加载连接器。配置凭证后指定一个训练日期进行只读验证。
+未通过真实账号读取验证前，不能称为已连接。写回仍需先预览并明确确认。
+
 ## 数据与隐私边界
 
-- 凭据和缓存仅保存在 `%LOCALAPPDATA%\HealthyFitnessCoach\`；缓存按日期存储。
+- Windows 凭据和缓存保存在 `%LOCALAPPDATA%\HealthyFitnessCoach\`；Mac 凭据保存在钥匙串，缓存位置见上文；缓存按日期存储。
 - MCP 提供按日/按范围读取、趋势分析、训练DNA提取、写回预览和显式确认写回；读取与DNA提取工具仍为**只读**，写回不是整天覆盖删除。
 - 写回前先调用预览工具，确认所有记录属于同一天、最多 12 条且每条不超过 1500 字符；更新已有记录时保留 `id:`，有 `train_time:` 时原样带回。
 - 成功写回后，以训记返回的最新 `res` 作为最终结果并更新当天缓存。
@@ -58,7 +94,7 @@ Node 18 依赖树中仍存在已知的 Hono static-server advisory。该 Plugin 
 
 ## 连接与写回恢复
 
-本地连接器仍仅支持 Windows，不提供手机远程服务。凭据通过本机受保护入口配置，禁止在聊天提交 Key。手机可使用独立 Skill 导入数据。
+本地连接器支持 Windows 和 macOS，不提供手机远程服务。凭据通过本机受保护入口配置，禁止在聊天提交 Key。手机可使用独立 Skill 导入数据。
 
 范围、趋势、DNA支持 `refresh_dates` 和 `refresh_all`。最近七天缓存满五分钟更新，90秒内不重复刷新。
 

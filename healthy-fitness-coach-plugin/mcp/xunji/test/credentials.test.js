@@ -34,3 +34,56 @@ test('credential scripts use DPAPI SecureString storage and scoped deletion', ()
   assert.match(remove, /GetFullPath/);
   assert.match(remove, /Remove-Item/);
 });
+
+const { readMacCredential, readCredential, dataHome, KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT } = require('../src/credentials.js');
+
+function mockSecurity({ value = '  FAKE KEY  \n', code = 0, error = false, onSpawn = () => {} } = {}) {
+  return (command, args, options) => {
+    onSpawn(command, args, options);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.kill = () => {};
+    queueMicrotask(() => {
+      if (error) child.emit('error', new Error('PRIVATE_ERROR_MUST_NOT_LEAK'));
+      else child.stdout.emit('data', Buffer.from(value));
+      child.emit('close', code);
+    });
+    return child;
+  };
+}
+
+test('macOS reads only the dedicated Keychain item and preserves opaque whitespace', async () => {
+  const value = await readCredential({ platform: 'darwin', spawnProcess: mockSecurity({ onSpawn(command, args, options) {
+    assert.equal(command, '/usr/bin/security');
+    assert.deepEqual(args, ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', KEYCHAIN_ACCOUNT, '-w']);
+    assert.deepEqual(options.stdio, ['ignore', 'pipe', 'ignore']);
+  } }) });
+  assert.equal(value, '  FAKE KEY  ');
+});
+
+test('macOS missing, denied, empty and failed Keychain reads expose no secret or native error', async () => {
+  for (const options of [{ code: 44, value: 'PRIVATE' }, { code: 36 }, { value: '\n' }, { error: true }]) {
+    await assert.rejects(readMacCredential({ spawnProcess: mockSecurity(options) }), error => {
+      assert.equal(error.code, 'missing_credentials');
+      assert.doesNotMatch(error.message, /PRIVATE/);
+      return true;
+    });
+  }
+  await assert.rejects(readCredential({ platform: 'linux' }), { code: 'missing_credentials' });
+});
+
+test('macOS stalled Keychain process is killed on timeout', async () => {
+  let killed = false;
+  await assert.rejects(readMacCredential({ timeoutMs: 5, spawnProcess() {
+    const child = new EventEmitter(); child.stdout = new EventEmitter();
+    child.kill = () => { killed = true; };
+    return child;
+  } }), { code: 'missing_credentials' });
+  assert.equal(killed, true);
+});
+
+test('platform data directories preserve Windows and avoid project-local macOS caches', () => {
+  assert.equal(dataHome({ platform: 'darwin', home: '/Users/test', localAppData: '/wrong' }), '/Users/test/Library/Application Support');
+  assert.equal(dataHome({ platform: 'win32', localAppData: 'C:\\Local' }), 'C:\\Local');
+  assert.equal(dataHome({ platform: 'linux' }), undefined);
+});

@@ -6,7 +6,7 @@
 
 1. 先判断能力，不先索取 Key。“连接训记”已表达连接意图，无需再次询问相同问题；仅提及训记不自动连接。
 2. 连接器和凭据就绪：读取用户指定的一个日期验证；未指定则询问日期。成功空记录与请求失败分别说明。
-3. 有连接器但缺凭据：引导宿主受保护输入入口；Windows Plugin 使用本地凭据配置脚本。禁止让用户在对话、截图或文件中提交 API Key。
+3. 有连接器但缺凭据：引导宿主受保护输入入口；Windows Plugin 使用本地 DPAPI 凭据配置脚本；macOS 使用 `keychain-credential.swift set` 打开本机安全输入窗口并写入登录钥匙串。禁止让用户在对话、截图或文件中提交 API Key。
 4. 无兼容工具或安全配置入口：提供“导入文本/文件/截图”和“先开始训练”。仓库未提供远程服务，不声称手机能运行本地 stdio/DPAPI。
 5. 使用本文件的接口契约，不要求每个用户重新找 API 文档。接口变化时才请求不含 Key 的官方说明，并标记待验证。
 
@@ -28,7 +28,7 @@
 
 ## 读取规则
 
-连接器调用 `/api_trains_for_llm`，使用 `datestr: YYYY-MM-DD` 和本机 DPAPI 凭据。响应可能是 gzip JSON，核心数据在 `res` 数组中。保留每条记录的原始文本、`id:`、`train_time:`、`record_date`、`fetched_at`、缓存命中状态和警告。
+连接器调用 `/api_trains_for_llm`，使用 `datestr: YYYY-MM-DD` 和本机安全存储凭据（Windows DPAPI / macOS 钥匙串）。响应可能是 gzip JSON，核心数据在 `res` 数组中。保留每条记录的原始文本、`id:`、`train_time:`、`record_date`、`fetched_at`、缓存命中状态和警告。
 
 同一训练日 90 秒内不要重复刷新。最近七天缓存满五分钟自动更新；更早日期默认读缓存。补录使用 `refresh_dates`，明确整段刷新用 `refresh_all: true`；范围、趋势和DNA均支持。刷新失败标记 `refresh_failed_using_cache`，不得称为最新数据。缓存按凭据 fingerprint 隔离，不能跨账号复用。
 
@@ -67,7 +67,7 @@ DNA版本只保存在本机`HealthyFitnessCoach/training-dna/`，文件名使用
 ## 隐私与安全
 
 - 不在聊天内容、日志、Markdown、HTML、结构化输出或 Git 中保存 API key；
-- 使用本机 `set-credential.ps1` 通过 Windows DPAPI 保存和读取凭据，不要求用户在对话中粘贴 key；
+- Windows 使用本机 `set-credential.ps1` 通过 DPAPI 保存凭据，macOS 使用 `keychain-credential.swift set` 通过 Security.framework 保存凭据，不要求用户在对话中粘贴 key；
 - Garmin 来源记录在面向模型输出前过滤；来源未知时降低置信度；
 - 红旗症状或数据不完整时，安全分流优先于读取、趋势分析和写回；
 - 真实账号 smoke test 只在用户本机配置凭据后手动触发，自动化测试使用 mock/fixture。
